@@ -3,20 +3,36 @@ module.exports = function(RED)
 	function AlarmNodeOut(config)
 	{
 		RED.nodes.createNode(this, config);
-        this.all = config.all;
-        if (typeof(this.all) == "undefined" || this.all == false)
-            this.hmiID = config.hmiID;
-        else
-            this.hmiID = "*";
+		var flow = this.context().global;
+		var globalNodes = flow.get("nodes"); 
+        	this.all = config.all;
+        	if (typeof(this.all) == "undefined" || this.all == false)
+        	    this.hmiID = config.hmiID;
+        	else
+            	this.hmiID = "*";
         
-        this.configSSE = RED.nodes.getNode(config.sse);
+        	this.configSSE = RED.nodes.getNode(config.sse);
+        	this.configSSE.subscription(this, this.configSSE, this.id, this.hmiID, "alarm");
+		
+		if (typeof(globalNodes) === "undefined")
+		{
+			globalNodes = [];
+		}
+
+        	outNode = this;
+		globalNodes.push(outNode);
+		flow.set("nodes", globalNodes);
         
-        node = this;
-        node.manageData = function(data)
-        {
-            var msg = {"topic": "alarms", "payload" : data};
-            node.send(msg);
-        }
+        	outNode.manageData = function(data, node)
+        	{
+        	    var msg = {"topic": "alarms", "payload" : data};
+        	    node.send(msg);
+        	}
+		this.on('close', function()
+		{
+			outNode.configSSE.closeConnection(globalNodes);
+			flow.set("nodes", []);
+		});
 	}
 	RED.nodes.registerType("hmi-alarm out", AlarmNodeOut);
 	
@@ -58,7 +74,9 @@ module.exports = function(RED)
 
         this.on('input', function (msg) 
         {
-            node.configSSE.writeTag(node.configSSE, node.hmiID, msg.payload);
+	    var payload = JSON.parse(msg.payload);
+	    if (payload.tag == param.hmiID)
+		node.configSSE.writeTag(node.configSSE, payload.tag, payload.value);
         });
 
 	}

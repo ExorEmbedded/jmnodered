@@ -22,6 +22,7 @@
 	        onclick: function()
 	        {
 		        var lebel = this.name || "hmi-tag";
+			this.active = true;
 		        $.ajax(
 		        {
 		            url: "hmi-tag/" + this.id + "/" + (this.active ? "enable" : "disable"),

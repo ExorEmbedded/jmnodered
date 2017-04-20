@@ -1,4 +1,4 @@
-/*
+/**
  * Copyright 2013, 2016 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,11 +20,24 @@ module.exports = function(RED) {
     var util = require("util");
     var isUtf8 = require('is-utf8');
     var azure = require('azure-iot-common');
+    var awsIot = require('aws-iot-device-sdk');
     var azureBase = azure.SharedAccessSignature;
     var azureEncodeUriComponentStrict = azure.encodeUriComponentStrict;
     var azureAnHourFromNow = azure.anHourFromNow;
     var azureMessage = azure.Message;
-    var amqpCodec = require('amqp10/lib/codec'); 
+    var amqpCodec = require('amqp10/lib/codec');
+    var eurotechProtoBuf = require('protobufjs');
+    var eurotechByteBuffer = eurotechProtoBuf.ByteBuffer;
+    var eurotechBuilder = eurotechProtoBuf.loadProtoFile(__dirname + '/edcpayload.proto');
+    if (eurotechBuilder != null)
+    {
+        var eurotech = eurotechBuilder.build("edcdatatypes");
+        if(typeof(eurotech) == 'undefined')            
+        {
+            return;
+        }   
+    }
+    
     
     function matchTopic(ts,t) {
         if (ts == "#") {
@@ -66,11 +79,16 @@ module.exports = function(RED) {
             };
         }
 
-        if (this.credentials) {
+        if (this.credentials) 
+        {
             this.username = this.credentials.user;
             this.password = this.credentials.password;
         }
 
+        this.keypath = n.keypath;
+        this.certpath = n.certpath;
+        this.capath = n.capath;
+        
         // If the config node is missing certain options (it was probably deployed prior to an update to the node code),
         // select/generate sensible options for the new fields
         if (typeof this.usetls === 'undefined'){
@@ -117,7 +135,7 @@ module.exports = function(RED) {
         if (this.cloud === "AZURE")
         {
            var uri = azureEncodeUriComponentStrict(this.broker + '/devices/' + this.clientid);
-           var passwordObj = azureBase.create(uri, null, this.password, azureAnHourFromNow());
+	   var passwordObj = azureBase.create(uri, null, this.password, azureAnHourFromNow());
            this.password = passwordObj.toString();
            this.options.protocolId = 'MQTT';
            this.options.protocolVersion = 4;
@@ -133,12 +151,25 @@ module.exports = function(RED) {
 
         this.options.clientId = this.clientid || 'mqtt_' + (1+Math.random()*4294967295).toString(16);
         this.options.username = this.username;
-        this.options.password = new Buffer(this.password);
+        if (typeof(this.password) != "undefined")
+            this.options.password = new Buffer(this.password);
+        else
+            this.options.password = "";
         this.options.keepalive = this.keepalive;
 
         this.options.clean = this.cleansession;
         this.options.reconnectPeriod = RED.settings.mqttReconnectTime||5000;
         this.options.rejectUnauthorized = (this.verifyservercert == "true" || this.verifyservercert === true)
+        
+        if (this.cloud === "AWS")
+        {
+            this.options.keyPath = this.keypath;
+            this.options.certPath = this.certpath;
+            this.options.caPath = this.capath;
+            this.options.host = this.broker;
+            this.options.thingName = this.options.clientId;
+            this.options.port = 8883;
+        }
 
         if (n.willTopic) {
             this.options.will = {
@@ -173,13 +204,18 @@ module.exports = function(RED) {
             done();
         };
 
-        this.connect = function () {
+        this.connect = function () 
+        {
             if (!node.connected && !node.connecting) {
                 node.connecting = true;
-                node.client = mqtt.connect(node.brokerurl ,node.options);
+                if (node.cloud === "AWS")
+                    node.client = awsIot.device(node.options);
+                else
+                    node.client = mqtt.connect(node.brokerurl ,node.options);
                 node.client.setMaxListeners(0);
                 // Register successful connect or reconnect handler
-                node.client.on('connect', function () {
+                node.client.on('connect', function () 
+                {
                     node.connecting = false;
                     node.connected = true;
                     node.log(RED._("mqtt.state.connected",{broker:(node.clientid?node.clientid+"@":"")+node.brokerurl}));
@@ -216,7 +252,8 @@ module.exports = function(RED) {
                     }
                 })
                 // Register disconnect handlers
-                node.client.on('close', function () {
+                node.client.on('close', function (err) 
+		{
                     if (node.connected)
                     {
                         node.connected = false;
@@ -280,7 +317,8 @@ module.exports = function(RED) {
             }
         };
 
-        this.publish = function (msg) {
+        this.publish = function (msg) 
+        {
             if (node.connected) {
                 if (!Buffer.isBuffer(msg.payload)) {
                     if (typeof msg.payload === "object") 
@@ -303,8 +341,7 @@ module.exports = function(RED) {
                 if (node.cloud === "AZURE")
                 {
                     msg.topic = "devices/" + node.clientid + "/messages/events/type=" + type;
-                    var p = {d: msg.payload};
-                    msg.payload = p;
+                    msg.payload = JSON.stringify(msg.payload);
                 }
                 else if (node.cloud === "BLUEMIX")
                 {
@@ -312,30 +349,44 @@ module.exports = function(RED) {
                     date.toISOString();
                     msg.topic = "iot-2/evt/" + type + "/fmt/json";
                     var p = {d: msg.payload, ts: date};
-                    msg.payload = p;
+                    msg.payload = JSON.stringify(p);
+                }
+                else if(node.cloud === "AWS")
+                {
+                    msg.topic = node.clientid + "/evt/" + type;
+                    msg.payload = JSON.stringify(msg.payload);
                 }
                 else if (node.cloud === "EUROTECH")
                 {
+                    var date = new Date();
                     msg.topic =  "EDALab-FB/" + node.clientid + "/" + type + "/data";
-                    var metrics = new Array();
-                    var position = {"longitude" : "", "latitude" : "",
-                                    "altitude" : "", "precision" : "",
-                                    "heading" : "", "speed" : "",
-                                    "timestamp" : "","satellites" : "", "status" : ""
-                                   };
+                    var payload = new eurotech.EdcPayload();
+                    payload.timestamp = date.getTime();
                     msg.payload.forEach(function(value, index)
                     {
-                        var metric = {"name" : value.n, "type": "int", "value": "" + value.v.v};
-                        metrics.push(metric);
+                        payload.metric[index] = new eurotech.EdcPayload.EdcMetric();
+                        payload.metric[index].name = value.n;
+                        payload.metric[index].type = eurotech.EdcPayload.EdcMetric.ValueType.INT32;
+                        payload.metric[index].int_value = value.v.v;
                     });
 
-                    var date = new Date();
-                    var p = {"sentOn": date, "metrics": {"metric": metrics}, "position": position, "body": ""};
-                    msg.payload = p;
-                    
+                    payload.position = new eurotech.EdcPayload.EdcPosition();
+                    payload.position.latitude = 0.0;
+                    payload.position.longitude = 0.0;
+                    payload.position.altitude = 0.0;
+                    payload.position.precision = 0.0;
+                    payload.position.heading = 0.0;
+                    payload.position.speed = 0.0;
+                    payload.position.timestamp = 0;
+                    payload.position.satellites = 0;
+                    payload.position.status = 0;
+
+                    var tempBuffer = eurotechByteBuffer.allocate(1024);
+                    var buf = payload.encode(tempBuffer).flip().toBuffer();
+                    msg.payload = buf;
+                    console.log(eurotechByteBuffer.wrap(msg.payload).toDebug(true));
                 }
-                console.log("PAYLOAD " + JSON.stringify(msg.payload));
-                node.client.publish(msg.topic, JSON.stringify(msg.payload), options, function (err){return});
+                node.client.publish(msg.topic, msg.payload, options, function (err){return});
             }
         };
 
@@ -370,7 +421,7 @@ module.exports = function(RED) {
         }
 	
         this.cloud = this.brokerConn.cloud;
-	this.clientid = this.brokerConn.clientid;
+	    this.clientid = this.brokerConn.clientid;
         var node = this;
         if (this.brokerConn) {
             this.status({fill:"red",shape:"ring",text:"common.status.disconnected"});
@@ -387,16 +438,39 @@ module.exports = function(RED) {
                 {
 		            this.topic = "iot-2/cmd/" + type + "/fmt/json";
                 }
-
-                this.brokerConn.subscribe(this.topic,2,function(topic,payload,packet) 
+                else if (node.cloud === "AWS")
                 {
-	            if (node.cloud === "AZURE")
+		            this.topic = "devices/" + node.clientid + "/cmd/#";
+                }
+                else if (node.cloud === "EUROTECH")
+                {
+                    this.topic = "EDALab-FB/" + node.clientid + "/#";
+                }
+
+                this.brokerConn.subscribe(this.topic,1,function(topic,payload,packet) 
+                {
+			        if (node.cloud === "AZURE")
+		            {
+						payload = node.decodeAmqpInMqttMsg(payload);
+						if (payload == null)
+		                	payload = "";
+						payload = payload.data;
+					}
+                    else if(node.cloud == "EUROTECH")
                     {
-		    	payload = node.decodeAmqpInMqttMsg(payload);
-		    	if (payload == null)
-                    		payload = "";
-		    	payload = payload.data;
-		    }
+                        payload = eurotech.EdcPayload.decode(payload);
+                        var obj = payload.metric[0];
+                        var data = {tag: obj.name};
+                        switch(obj.type)
+                        {
+                            case 3:
+                                data.value = obj.int_value;
+                                break;
+                        }
+                        payload = data;
+                        payload = JSON.stringify(payload);
+                    }
+
                     if (isUtf8(payload)) { payload = payload.toString('utf8'); }
                     var msg = {topic:topic,payload:payload, qos: packet.qos, retain: packet.retain};
                     if ((node.brokerConn.broker === "localhost")||(node.brokerConn.broker === "127.0.0.1")) {
@@ -411,7 +485,8 @@ module.exports = function(RED) {
             else {
                 this.error(RED._("mqtt.errors.not-defined"));
             }
-            this.on('close', function(done) {
+            this.on('close', function(done) 
+            {
                 if (node.brokerConn) {
                     node.brokerConn.unsubscribe(node.topic,node.id);
                     node.brokerConn.deregister(node,done);
@@ -421,16 +496,16 @@ module.exports = function(RED) {
             this.error(RED._("mqtt.errors.missing-config"));
         }
 
-	this.decodeAmqpInMqttMsg = function(payload)
-	{
-	    var decoded = amqpCodec.decode(payload, 0);
-	    if (!decoded)
-	    {
-	    	return null;
-	    }
-	    var message = decoded[0];
-	    return message;
-	}
+		this.decodeAmqpInMqttMsg = function(payload)
+		{
+			var decoded = amqpCodec.decode(payload, 0);
+			if (!decoded)
+			{
+				return null;
+			}
+			var message = decoded[0];
+			return message;
+		}
     }
     RED.nodes.registerType("exor-mqtt in",MQTTInNode);
 

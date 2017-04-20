@@ -4,20 +4,36 @@ module.exports = function(RED)
 	{
 		RED.nodes.createNode(this, config);
 
-        this.all = config.all;
-        if (typeof(this.all) == "undefined" || this.all == false)
-            this.hmiID = config.hmiID;
-        else
-            this.hmiID = "*";
-        
-        this.configSSE = RED.nodes.getNode(config.sse);
+		var flow = this.context().global;
+		var globalNodes = flow.get("nodes"); 
 
-        outNode = this;
-        outNode.manageData = function(data)
-        {
-            var msg = {"topic": "tags", "payload" : data};
-            outNode.send(msg);
-        }
+        	this.all = config.all;
+        	if (typeof(this.all) == "undefined" || this.all == false)
+        	    this.hmiID = config.hmiID;
+        	else
+            		this.hmiID = "*";
+        
+       		this.configSSE = RED.nodes.getNode(config.sse);
+        	this.configSSE.subscription(this, this.configSSE, this.id, this.hmiID, "tag");
+
+		if (typeof(globalNodes) === "undefined")
+		{
+			globalNodes = [];
+		}
+
+        	outNode = this;
+		globalNodes.push(outNode);
+		flow.set("nodes", globalNodes);
+        	outNode.manageData = function(data, node)
+       	 	{
+            		var msg = {"topic": "tags", "payload" : data};
+            		node.send(msg);
+        	}
+		this.on('close', function()
+		{
+			outNode.configSSE.closeConnection(globalNodes);
+			flow.set("nodes", []);
+		});
 	}
 	RED.nodes.registerType("hmi-tag out", TagOutNode);
 	
@@ -54,6 +70,7 @@ module.exports = function(RED)
 		RED.nodes.createNode(this, config);
         this.hmiID = config.hmiID;
         this.configSSE = RED.nodes.getNode(config.sse);
+
         node = this;
 	    var param = node;
 
@@ -61,7 +78,9 @@ module.exports = function(RED)
         {
 			var payload = JSON.parse(msg.payload);
 			if (payload.tag == param.hmiID)
-            	node.configSSE.writeTag(node.configSSE, payload.tag, payload.value);
+			{
+            			node.configSSE.writeTag(node.configSSE, payload.tag, payload.value);
+			}
         });
 
 	}

@@ -138,10 +138,12 @@
             </div>
             <div class="form-row node-input-cloud">
                 <label for="node-config-input-cloud"><i class="fa fa-globe"></i>Cloud</label>
-                <select id="node-config-input-cloud">
+                <select id="node-config-input-cloud" onchange="cloudSelection()">
                     <option value="BLUEMIX">Bluemix</option>
                     <option value="AZURE">Azure</option>
+                    <option value="AWS">AWS</option>
                     <option value="EUROTECH">Eurotech</option>
+                    <option value="IAAS">IaaS</option>
                 </select>
             </div>
             <div class="form-row">
@@ -161,21 +163,33 @@
             </div>
         </div>
         <div id="exor-mqtt-broker-tab-security" style="display:none">
-            <div class="form-row">
-                <label for="node-config-input-user"><i class="fa fa-user"></i> <span data-i18n="common.label.username"></span></label>
+            <div class="form-row" id="node-config-row-user">
+                <label id="node-config-label-user" for="node-config-input-user"><i class="fa fa-user"></i> <span data-i18n="common.label.username"></span></label>
                 <input type="text" id="node-config-input-user">
             </div>
-            <div class="form-row">
-                <label for="node-config-input-password"><i class="fa fa-lock"></i> <span data-i18n="common.label.password"></span></label>
+            <div class="form-row" id="node-config-row-password">
+                <label id="node-config-label-password" for="node-config-input-password"><i class="fa fa-lock"></i> <span data-i18n="common.label.password"></span></label>
                 <input type="password" id="node-config-input-password">
             </div>
-            <div class="form-row">
+            <div class="form-row" id="node-config-row-usetls">
                 <input type="checkbox" id="node-config-input-usetls" style="display: inline-block; width: auto; vertical-align: top;">
-                <label for="node-config-input-usetls" style="width: 70%;" data-i18n="mqtt.label.use-tls"></label>
+                <label id="node-config-label-usetls" for="node-config-input-usetls" style="width: 70%;" data-i18n="mqtt.label.use-tls"></label>
             </div>
-            <div class="form-row">
+            <div class="form-row" id="node-config-row-verifyservercert">
                 <input type="checkbox" id="node-config-input-verifyservercert" style="display: inline-block; width: auto; vertical-align: top;">
-                <label for="node-config-input-verifyservercert" style="width: 70%;" data-i18n="mqtt.label.verify-server-cert"></label>
+                <label id="node-config-label-verifyservercert" for="node-config-input-verifyservercert" style="width: 70%;" data-i18n="mqtt.label.verify-server-cert"></label>
+            </div>
+            <div class="form-row" id="node-config-row-keypath">
+                <label id="node-config-label-keypath" for="node-config-input-keypath"><i class="fa fa-file-o"></i> <span>Key</span></label>
+                <input type="text" id="node-config-input-keypath" data-i18n="[placeholder]aws-iot.placeholder.keypath">
+            </div>
+            <div class="form-row" id="node-config-row-certpath">
+                <label id="node-config-label-certpath" for="node-config-input-certpath"><i class="fa fa-file-o"></i> <span>Cert</span></label>
+                <input type="text" id="node-config-input-certpath" data-i18n="[placeholder]aws-iot.placeholder.certpath">
+            </div>
+            <div class="form-row" id="node-config-row-capath">
+                <label id="node-config-label-capath" for="node-config-input-capath"><i class="fa fa-file-o"></i> <span>CA</span></label>
+                <input type="text" id="node-config-input-capath" data-i18n="[placeholder]aws-iot.placeholder.capath">
             </div>
         </div>
         <div id="exor-mqtt-broker-tab-birth" style="display:none">
@@ -255,7 +269,10 @@
             birthTopic: {value:""},
             birthQos: {value:"0"},
             birthRetain: {value:false},
-            birthPayload: {value:""}
+            birthPayload: {value:""},
+            keypath: {value:""},
+            certpath: {value:""},
+            capath: {value:""}
         },
         credentials: {
             user: {type:"text"},
@@ -348,4 +365,44 @@
             });
         }
     });
+</script>
+<script>
+function cloudSelection()
+{
+    var cloud = document.getElementById("node-config-input-cloud");
+    var selected = cloud.options[cloud.selectedIndex].value;
+    
+    var user = document.getElementById("node-config-row-user");
+    var password = document.getElementById("node-config-row-password");
+    var usetls = document.getElementById("node-config-row-usetls");
+    var verifyservercert = document.getElementById("node-config-row-verifyservercert");
+    var keypath = document.getElementById("node-config-row-keypath");
+    var certpath = document.getElementById("node-config-row-certpath");
+    var capath = document.getElementById("node-config-row-capath");
+    
+    
+    if (selected == "AWS")
+    {
+        user.style.display = 'none';
+        password.style.display = 'none';
+        usetls.style.display = 'none';
+        verifyservercert.style.display = 'none';
+        
+        keypath.style.display = 'block';
+        certpath.style.display = 'block';
+        capath.style.display = 'block';
+        
+    }
+    else
+    {
+        user.style.display = 'block';
+        password.style.display = 'block';
+        usetls.style.display = 'block';
+        verifyservercert.style.display = 'block';
+        
+        keypath.style.display = 'none';
+        certpath.style.display = 'none';
+        capath.style.display = 'none';
+    }
+}
 </script>

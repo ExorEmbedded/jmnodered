@@ -19,6 +19,7 @@ module.exports = function(RED)
         this.allRequest = {"tag": false, "alarm": false, "group": false};
         this.allRequestStart = {"tag": false, "alarm": false, "group": false};
         this.subscriptions = {};
+        this.subscribedNodes = {};
         this.nodeSSE = null;
         var node = this;
        
@@ -78,7 +79,6 @@ module.exports = function(RED)
 
             path = node.requestId + path;
 		
-            console.log("SEND GET REQUEST WITH " + path);
             var options = 
             {
                 host: node.host,
@@ -109,7 +109,7 @@ module.exports = function(RED)
             {
                 node.subscriptions[hmiName].forEach(function(v,i)
                 {
-                    v.node.manageData(data);
+                    v.node.manageData(data, v.node);
                 });
             }
         }
@@ -119,12 +119,23 @@ module.exports = function(RED)
             es.onopen = function(event)
             {
                 console.log("Open connection");
+
+                // reapply all subscriptions in case server restarted
+                for(var idNode in node.subscribedNodes)
+                {
+                    var data = node.subscribedNodes[idNode];
+                    try {
+                        node.subscription(data.hmi, data.config, idNode, data.hmiId, data.hmiType);
+                    } catch(e) {
+                        console.log("caught exception while re-subscribing nodes: " + e);
+                    }
+                };
             }
 
             es.onerror = function(event)
             {
                 console.log("Error" + JSON.stringify(event));
-            }
+            };
 
             es.addEventListener("tags", function(event)
             {
@@ -254,14 +265,31 @@ module.exports = function(RED)
                 node.subscriptions[hmiId] = [];
                 reg = true;
             }
+	    // remove any previously added subscriptions
+            subs = node.subscriptions[hmiId];
+            subs.forEach(function(value, index)
+            {
+                if(value["idNode"] == idNode)
+                    subs.splice(index, 1);
+            });
             node.subscriptions[hmiId].push({"idNode": idNode, "node": hmi});
             
             return reg;
+        }
+        
+	//Public function
+        node.closeConnection = function(nodes)
+        {
+	    nodes.forEach(function(element,data)
+	    {
+		element.configSSE.nodeSSE.close();
+	    });
         }
        
         //Public function
         node.subscription = function(hmi, config, idNode, hmiId, hmiType)
         {
+	    node.subscribedNodes[idNode] = { hmi : hmi, config : config, hmiId : hmiId, hmiType : hmiType };
             node = config;
             node.hmiId = hmiId;
             node.hmiType = hmiType;
@@ -284,6 +312,7 @@ module.exports = function(RED)
         
          node.unsubscription = function(config, idNode, hmiId, hmiType)
          {
+            delete node.subscribedNodes[hmiId];
             node = config;
             node.hmiId = hmiId;
             node.hmiType = hmiType;
@@ -318,6 +347,8 @@ module.exports = function(RED)
                   t1: hmiId + ".0",
                   v1: value
             });
+	    
+	    console.log(JSON.stringify(data));
 
             var options = 
             {
